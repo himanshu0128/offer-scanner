@@ -125,6 +125,18 @@ export default function OfferDashboardPage() {
 
   useEffect(() => {
     fetchAccounts();
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const connectedEmail = params.get('connected');
+      const oauthError = params.get('error');
+      if (connectedEmail) {
+        showToast(`Connected ${connectedEmail} and scanned last 30 days!`);
+        window.history.replaceState({}, '', '/');
+      } else if (oauthError) {
+        showToast(`Google OAuth error: ${oauthError}`);
+        window.history.replaceState({}, '', '/');
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -593,13 +605,13 @@ export default function OfferDashboardPage() {
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
                   Production OAuth 2.0 (Read-Only 30-Day Scan)
                 </p>
-                <button
-                  onClick={handleConnectGoogleOAuth}
+                <a
+                  href="/api/accounts/google"
                   className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
                 >
                   <Mail className="h-4 w-4 text-red-500" />
                   Connect Gmail with Google OAuth
-                </button>
+                </a>
               </div>
 
               <div className="relative flex py-1 items-center">
