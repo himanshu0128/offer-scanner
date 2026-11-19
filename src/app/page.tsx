@@ -599,52 +599,17 @@ export default function OfferDashboardPage() {
               </button>
             </div>
 
-            <div className="mt-5 space-y-5">
-              {/* Option 1: Real Gmail OAuth */}
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Production OAuth 2.0 (Read-Only 30-Day Scan)
-                </p>
-                <a
-                  href="/api/accounts/google"
-                  className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
-                >
-                  <Mail className="h-4 w-4 text-red-500" />
-                  Connect Gmail with Google OAuth
-                </a>
-              </div>
-
-              <div className="relative flex py-1 items-center">
-                <div className="flex-grow border-t border-slate-200" />
-                <span className="flex-shrink mx-3 text-xs text-slate-400">
-                  OR ADD DEMO INBOX
-                </span>
-                <div className="flex-grow border-t border-slate-200" />
-              </div>
-
-              {/* Option 2: Instant Demo Inbox Account */}
-              <form onSubmit={handleAddDemoAccount} className="space-y-3">
-                <label className="block text-xs font-medium text-slate-700">
-                  Add a Demo Email Account to simulate multi-inbox scanning
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={newDemoEmail}
-                  onChange={(e) => setNewDemoEmail(e.target.value)}
-                  placeholder="e.g. deals.inbox@gmail.com"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={addingAccount}
-                  className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
-                >
-                  {addingAccount
-                    ? 'Connecting & Scanning 30 Days...'
-                    : 'Connect & Scan Last 30 Days'}
-                </button>
-              </form>
+            <div className="mt-5 space-y-4">
+              <p className="text-xs text-slate-500">
+                Grant read-only access to scan the last 30 days of promotional emails. You can connect as many Gmail accounts as you like.
+              </p>
+              <a
+                href="/api/accounts/google"
+                className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+              >
+                <Mail className="h-4 w-4" />
+                Connect Gmail with Google OAuth
+              </a>
             </div>
           </div>
         </div>
