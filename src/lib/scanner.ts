@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { fetchLast30DaysPromotionalEmails, RawEmailMessage } from './gmail';
 import { extractOfferFromEmail, getMerchantLogoUrl } from './extractor';
+import { decryptToken } from './crypto';
 
 export interface ScanSummary {
   accountsScanned: number;
@@ -40,10 +41,14 @@ export async function runOfferScan(
       let emails: RawEmailMessage[] = [];
 
       if (account.provider === 'google' && account.accessToken) {
-        emails = await fetchLast30DaysPromotionalEmails(
-          account.accessToken,
-          account.refreshToken
-        );
+        const plainAccessToken = decryptToken(account.accessToken);
+        const plainRefreshToken = decryptToken(account.refreshToken);
+        if (plainAccessToken) {
+          emails = await fetchLast30DaysPromotionalEmails(
+            plainAccessToken,
+            plainRefreshToken
+          );
+        }
       } else if (account.provider === 'demo') {
         emails = getDemoInboxEmailsForLast30Days(account.email);
       }

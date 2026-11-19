@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { getGoogleOAuthClient } from '@/lib/gmail';
 import { prisma } from '@/lib/prisma';
 import { runOfferScan } from '@/lib/scanner';
+import { encryptToken } from '@/lib/crypto';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -26,11 +27,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${appUrl}?error=missing_email_scope`);
     }
 
+    const encryptedAccess = encryptToken(tokens.access_token);
+    const encryptedRefresh = tokens.refresh_token
+      ? encryptToken(tokens.refresh_token)
+      : undefined;
+
     const account = await prisma.emailAccount.upsert({
       where: { email },
       update: {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || undefined,
+        accessToken: encryptedAccess,
+        refreshToken: encryptedRefresh,
         expiresAt: tokens.expiry_date ? Math.floor(tokens.expiry_date / 1000) : null,
         provider: 'google',
         status: 'active',
@@ -38,8 +44,8 @@ export async function GET(req: NextRequest) {
       create: {
         email,
         provider: 'google',
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || null,
+        accessToken: encryptedAccess,
+        refreshToken: encryptedRefresh || null,
         expiresAt: tokens.expiry_date ? Math.floor(tokens.expiry_date / 1000) : null,
         status: 'active',
       },
