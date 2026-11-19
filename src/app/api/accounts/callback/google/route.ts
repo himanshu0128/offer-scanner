@@ -137,8 +137,11 @@ export async function GET(req: NextRequest) {
       maxAge: 60 * 60 * 24 * 7, // 7 days
     });
     return response;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Google OAuth callback error:', error);
-    return NextResponse.redirect(`${appUrl}?error=oauth_failed`);
+    const errMsg = error?.message || 'unknown';
+    return NextResponse.redirect(
+      `${appUrl}?error=${encodeURIComponent(`oauth_failed: ${errMsg}`)}`
+    );
   }
 }
