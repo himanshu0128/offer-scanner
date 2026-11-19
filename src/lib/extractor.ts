@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { RawEmailMessage } from './gmail';
 
 export type OfferCategory =
@@ -50,7 +50,13 @@ export async function extractOfferFromEmail(
 
   if (apiKey && apiKey !== 'your-gemini-api-key') {
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-1.5-flash',
+        generationConfig: {
+          responseMimeType: 'application/json',
+        },
+      });
       const prompt = `You are a precision promotional email parser. Analyze the following email received on ${email.receivedAt.toISOString()} and determine if it contains a consumer promotional offer, discount, coupon, or sale.
 
 Email From: ${email.from}
@@ -73,15 +79,8 @@ Respond ONLY with a valid JSON object matching this exact schema:
   "expiresAt": string | null (ISO 8601 date string if an expiration date is mentioned or can be inferred relative to ${email.receivedAt.toISOString()}, otherwise null)
 }`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-
-      const text = response.text;
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
       if (text) {
         const parsed = JSON.parse(text) as ExtractedOffer;
         if (!parsed.isOffer) return null;
