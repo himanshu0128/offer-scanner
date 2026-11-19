@@ -90,7 +90,7 @@ export default function OfferDashboardPage() {
   const [selectedEmailId, setSelectedEmailId] = useState<string>('all');
   const [expirationFilter, setExpirationFilter] = useState<string>('active');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [groupByMerchant, setGroupByMerchant] = useState<boolean>(true);
+  const [groupByMerchant, setGroupByMerchant] = useState<boolean>(false);
 
   // Connect Account Modal
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
