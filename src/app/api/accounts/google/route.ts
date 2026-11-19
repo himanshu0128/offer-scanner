@@ -1,14 +1,14 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleAuthUrl } from '@/lib/gmail';
 import { generateOAuthState } from '@/lib/crypto';
 
-export async function GET() {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+export async function GET(req: NextRequest) {
+  const origin = req.nextUrl.origin;
   if (
     !process.env.GOOGLE_CLIENT_ID ||
     process.env.GOOGLE_CLIENT_ID === 'your-google-client-id.apps.googleusercontent.com'
   ) {
-    return NextResponse.redirect(`${appUrl}?error=missing_google_client_id`);
+    return NextResponse.redirect(`${origin}?error=missing_google_client_id`);
   }
 
   // Generate cryptographic CSRF state token and bind it to an HttpOnly cookie

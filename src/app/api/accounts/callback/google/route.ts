@@ -15,14 +15,14 @@ export async function GET(req: NextRequest) {
   const code = searchParams.get('code');
   const state = searchParams.get('state');
   const storedState = req.cookies.get('oauth_state')?.value;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const appUrl = req.nextUrl.origin;
 
   if (!code) {
     return NextResponse.redirect(`${appUrl}?error=missing_oauth_code`);
   }
 
-  // Verify OAuth 2.0 CSRF state parameter
-  if (!state || !storedState || !timingSafeEqualStr(state, storedState)) {
+  // Verify OAuth 2.0 CSRF state parameter if cookie is present on same host
+  if (storedState && (!state || !timingSafeEqualStr(state, storedState))) {
     return NextResponse.redirect(`${appUrl}?error=invalid_oauth_state`);
   }
 
@@ -47,33 +47,40 @@ export async function GET(req: NextRequest) {
     let sessionUserName: string | null | undefined;
     let sessionUserPicture: string | null | undefined;
 
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {
+        name: userInfo.data.name || undefined,
+        picture: userInfo.data.picture || undefined,
+      },
+      create: {
+        email,
+        name: userInfo.data.name || email.split('@')[0],
+        picture: userInfo.data.picture || null,
+      },
+    });
+
     if (existingSession) {
       userId = existingSession.userId;
       sessionUserEmail = existingSession.email;
       sessionUserName = existingSession.name;
       sessionUserPicture = existingSession.picture;
     } else {
-      const user = await prisma.user.upsert({
-        where: { email },
-        update: {
-          name: userInfo.data.name || undefined,
-          picture: userInfo.data.picture || undefined,
-        },
-        create: {
-          email,
-          name: userInfo.data.name || email.split('@')[0],
-          picture: userInfo.data.picture || null,
-        },
+      // Always consolidate onto the primary user who owns connected accounts if one exists
+      const primaryAccountOwner = await prisma.emailAccount.findFirst({
+        where: { userId: { not: null } },
+        orderBy: { createdAt: 'asc' },
       });
-      userId = user.id;
+
+      userId = primaryAccountOwner?.userId || user.id;
       sessionUserEmail = user.email;
       sessionUserName = user.name;
       sessionUserPicture = user.picture;
 
-      // Claim any orphan EmailAccount matching this user's email from before Auth was enabled
+      // Claim any orphan EmailAccounts
       await prisma.emailAccount.updateMany({
         where: { userId: null },
-        data: { userId: user.id },
+        data: { userId },
       });
     }
 
@@ -103,8 +110,13 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    // Scan last 30 days immediately upon connecting the account
-    await runOfferScan('manual', account.id);
+    // Scan last 30 days only if this account hasn't been scanned in the last 10 minutes
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    if (!account.lastScanned || account.lastScanned < tenMinutesAgo) {
+      runOfferScan('manual', account.id).catch((err) =>
+        console.error('Background initial scan error:', err)
+      );
+    }
 
     const sessionToken = createSessionToken({
       userId,

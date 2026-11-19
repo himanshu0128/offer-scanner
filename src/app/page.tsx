@@ -324,6 +324,12 @@ export default function OfferDashboardPage() {
   if (!authUser) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4">
+        {toastMessage && (
+          <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-xl">
+            <Sparkles className="h-4 w-4 text-amber-400" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm">
             <Tag className="h-6 w-6" />
