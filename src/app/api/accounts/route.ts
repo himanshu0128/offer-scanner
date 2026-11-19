@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getGoogleAuthUrl } from '@/lib/gmail';
+import { getGoogleAuthUrl, revokeGoogleToken } from '@/lib/gmail';
 import { runOfferScan } from '@/lib/scanner';
+import { decryptToken } from '@/lib/crypto';
 
 export async function GET() {
   try {
@@ -94,6 +95,18 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get('id');
     if (!id) {
       return NextResponse.json({ error: 'Account ID required' }, { status: 400 });
+    }
+
+    const existing = await prisma.emailAccount.findUnique({
+      where: { id },
+    });
+
+    if (existing && existing.provider === 'google') {
+      const refreshOrAccess =
+        decryptToken(existing.refreshToken) || decryptToken(existing.accessToken);
+      if (refreshOrAccess) {
+        await revokeGoogleToken(refreshOrAccess);
+      }
     }
 
     await prisma.emailAccount.delete({

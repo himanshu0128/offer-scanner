@@ -14,13 +14,26 @@ export function getGoogleOAuthClient() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-export function getGoogleAuthUrl() {
+export function getGoogleAuthUrl(state?: string) {
   const oauth2Client = getGoogleOAuthClient();
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
     scope: SCOPES,
+    state,
   });
+}
+
+/**
+ * Revokes an OAuth token with Google's OAuth2 revocation endpoint before deleting an account.
+ */
+export async function revokeGoogleToken(token: string): Promise<void> {
+  try {
+    const oauth2Client = getGoogleOAuthClient();
+    await oauth2Client.revokeToken(token);
+  } catch (err) {
+    console.warn('Google token revocation warning (token may already be expired):', err);
+  }
 }
 
 export interface RawEmailMessage {
@@ -37,13 +50,24 @@ export interface RawEmailMessage {
  */
 export async function fetchLast30DaysPromotionalEmails(
   accessToken: string,
-  refreshToken?: string | null
+  refreshToken?: string | null,
+  onTokenRefreshed?: (newAccessToken: string, expiryDate?: number | null) => Promise<void>
 ): Promise<RawEmailMessage[]> {
   const oauth2Client = getGoogleOAuthClient();
   oauth2Client.setCredentials({
     access_token: accessToken,
     refresh_token: refreshToken || undefined,
   });
+
+  if (onTokenRefreshed) {
+    oauth2Client.on('tokens', (tokens) => {
+      if (tokens.access_token) {
+        onTokenRefreshed(tokens.access_token, tokens.expiry_date).catch((err) =>
+          console.error('Failed to persist refreshed OAuth token:', err)
+        );
+      }
+    });
+  }
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 

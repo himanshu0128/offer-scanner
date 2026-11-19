@@ -3,15 +3,22 @@ import { google } from 'googleapis';
 import { getGoogleOAuthClient } from '@/lib/gmail';
 import { prisma } from '@/lib/prisma';
 import { runOfferScan } from '@/lib/scanner';
-import { encryptToken } from '@/lib/crypto';
+import { encryptToken, timingSafeEqualStr } from '@/lib/crypto';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const code = searchParams.get('code');
+  const state = searchParams.get('state');
+  const storedState = req.cookies.get('oauth_state')?.value;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
   if (!code) {
     return NextResponse.redirect(`${appUrl}?error=missing_oauth_code`);
+  }
+
+  // Verify OAuth 2.0 CSRF state parameter
+  if (!state || !storedState || !timingSafeEqualStr(state, storedState)) {
+    return NextResponse.redirect(`${appUrl}?error=invalid_oauth_state`);
   }
 
   try {
@@ -54,7 +61,11 @@ export async function GET(req: NextRequest) {
     // Scan last 30 days immediately upon connecting the account
     await runOfferScan('manual', account.id);
 
-    return NextResponse.redirect(`${appUrl}?connected=${encodeURIComponent(email)}`);
+    const response = NextResponse.redirect(
+      `${appUrl}?connected=${encodeURIComponent(email)}`
+    );
+    response.cookies.delete('oauth_state');
+    return response;
   } catch (error) {
     console.error('Google OAuth callback error:', error);
     return NextResponse.redirect(`${appUrl}?error=oauth_failed`);

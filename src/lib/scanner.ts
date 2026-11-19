@@ -1,7 +1,7 @@
 import { prisma } from './prisma';
 import { fetchLast30DaysPromotionalEmails, RawEmailMessage } from './gmail';
 import { extractOfferFromEmail, getMerchantLogoUrl } from './extractor';
-import { decryptToken } from './crypto';
+import { decryptToken, encryptToken, sanitizeExternalUrl } from './crypto';
 
 export interface ScanSummary {
   accountsScanned: number;
@@ -46,7 +46,16 @@ export async function runOfferScan(
         if (plainAccessToken) {
           emails = await fetchLast30DaysPromotionalEmails(
             plainAccessToken,
-            plainRefreshToken
+            plainRefreshToken,
+            async (newAccessToken, expiryDate) => {
+              await prisma.emailAccount.update({
+                where: { id: account.id },
+                data: {
+                  accessToken: encryptToken(newAccessToken),
+                  expiresAt: expiryDate ? Math.floor(expiryDate / 1000) : undefined,
+                },
+              });
+            }
           );
         }
       } else if (account.provider === 'demo') {
@@ -90,7 +99,7 @@ export async function runOfferScan(
             promoCode: extracted.promoCode,
             category: extracted.category,
             discountValue: extracted.discountValue,
-            offerUrl: extracted.offerUrl,
+            offerUrl: sanitizeExternalUrl(extracted.offerUrl),
             receivedAt: email.receivedAt,
             expiresAt: extracted.expiresAt ? new Date(extracted.expiresAt) : null,
           },
