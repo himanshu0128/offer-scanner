@@ -7,8 +7,20 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String?
+  picture       String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  emailAccounts EmailAccount[]
+}
+
 model EmailAccount {
   id           String    @id @default(cuid())
+  userId       String?
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   email        String    @unique
   provider     String    @default("google") // "google" | "microsoft" | "demo"
   accessToken  String?   @db.Text
@@ -19,6 +31,8 @@ model EmailAccount {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   offers       Offer[]
+
+  @@index([userId])
 }
 
 model Offer {

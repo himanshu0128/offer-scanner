@@ -4,6 +4,11 @@ import { getGoogleOAuthClient } from '@/lib/gmail';
 import { prisma } from '@/lib/prisma';
 import { runOfferScan } from '@/lib/scanner';
 import { encryptToken, timingSafeEqualStr } from '@/lib/crypto';
+import {
+  createSessionToken,
+  getSessionFromRequest,
+  SESSION_COOKIE_NAME,
+} from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -34,6 +39,44 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${appUrl}?error=missing_email_scope`);
     }
 
+    // Check if a user is already logged in (connecting a 2nd/3rd email account)
+    // Otherwise create or sign in the primary User record for this Google account
+    const existingSession = getSessionFromRequest(req);
+    let userId: string;
+    let sessionUserEmail: string;
+    let sessionUserName: string | null | undefined;
+    let sessionUserPicture: string | null | undefined;
+
+    if (existingSession) {
+      userId = existingSession.userId;
+      sessionUserEmail = existingSession.email;
+      sessionUserName = existingSession.name;
+      sessionUserPicture = existingSession.picture;
+    } else {
+      const user = await prisma.user.upsert({
+        where: { email },
+        update: {
+          name: userInfo.data.name || undefined,
+          picture: userInfo.data.picture || undefined,
+        },
+        create: {
+          email,
+          name: userInfo.data.name || email.split('@')[0],
+          picture: userInfo.data.picture || null,
+        },
+      });
+      userId = user.id;
+      sessionUserEmail = user.email;
+      sessionUserName = user.name;
+      sessionUserPicture = user.picture;
+
+      // Claim any orphan EmailAccount matching this user's email from before Auth was enabled
+      await prisma.emailAccount.updateMany({
+        where: { userId: null },
+        data: { userId: user.id },
+      });
+    }
+
     const encryptedAccess = encryptToken(tokens.access_token);
     const encryptedRefresh = tokens.refresh_token
       ? encryptToken(tokens.refresh_token)
@@ -42,6 +85,7 @@ export async function GET(req: NextRequest) {
     const account = await prisma.emailAccount.upsert({
       where: { email },
       update: {
+        userId,
         accessToken: encryptedAccess,
         refreshToken: encryptedRefresh,
         expiresAt: tokens.expiry_date ? Math.floor(tokens.expiry_date / 1000) : null,
@@ -49,6 +93,7 @@ export async function GET(req: NextRequest) {
         status: 'active',
       },
       create: {
+        userId,
         email,
         provider: 'google',
         accessToken: encryptedAccess,
@@ -61,10 +106,24 @@ export async function GET(req: NextRequest) {
     // Scan last 30 days immediately upon connecting the account
     await runOfferScan('manual', account.id);
 
+    const sessionToken = createSessionToken({
+      userId,
+      email: sessionUserEmail,
+      name: sessionUserName,
+      picture: sessionUserPicture,
+    });
+
     const response = NextResponse.redirect(
       `${appUrl}?connected=${encodeURIComponent(email)}`
     );
     response.cookies.delete('oauth_state');
+    response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
     return response;
   } catch (error) {
     console.error('Google OAuth callback error:', error);

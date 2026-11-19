@@ -18,7 +18,16 @@ import {
   Search,
   Layers,
   LayoutGrid,
+  LogOut,
+  ShieldCheck,
 } from 'lucide-react';
+
+interface AuthenticatedUser {
+  userId: string;
+  email: string;
+  name?: string | null;
+  picture?: string | null;
+}
 
 interface EmailAccount {
   id: string;
@@ -66,6 +75,8 @@ const CATEGORIES = [
 ];
 
 export default function OfferDashboardPage() {
+  const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [latestScan, setLatestScan] = useState<any>(null);
@@ -124,7 +135,27 @@ export default function OfferDashboardPage() {
   };
 
   useEffect(() => {
-    fetchAccounts();
+    const initAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          setAuthUser(data.user);
+          await fetchAccounts();
+        } else {
+          setAuthUser(null);
+          setLoading(false);
+        }
+      } catch {
+        setAuthUser(null);
+        setLoading(false);
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+
+    initAuth();
+
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const connectedEmail = params.get('connected');
@@ -140,8 +171,17 @@ export default function OfferDashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchOffers();
-  }, [selectedCategory, codeOnly, selectedEmailId, expirationFilter, searchQuery]);
+    if (authUser) {
+      fetchOffers();
+    }
+  }, [authUser, selectedCategory, codeOnly, selectedEmailId, expirationFilter, searchQuery]);
+
+  const handleSignOut = async () => {
+    await fetch('/api/auth/me', { method: 'DELETE' });
+    setAuthUser(null);
+    setAccounts([]);
+    setOffers([]);
+  };
 
   const handleManualRefresh = async () => {
     setScanning(true);
@@ -270,6 +310,52 @@ export default function OfferDashboardPage() {
     };
   };
 
+  if (authChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="flex items-center gap-3 text-sm font-medium text-slate-600">
+          <RefreshCw className="h-5 w-5 animate-spin text-indigo-600" />
+          <span>Verifying secure session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm">
+            <Tag className="h-6 w-6" />
+          </div>
+          <h1 className="text-center text-xl font-bold text-slate-900">
+            Sign in to InboxOffers
+          </h1>
+          <p className="mt-2 text-center text-sm text-slate-500">
+            Securely connect your email accounts to automatically scan the last 30 days of promotional offers.
+          </p>
+
+          <div className="mt-6">
+            <a
+              href="/api/accounts/google"
+              className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+            >
+              <Mail className="h-4 w-4" />
+              Sign in with Google
+            </a>
+          </div>
+
+          <div className="mt-6 flex items-start gap-2.5 rounded-xl bg-slate-50 p-3.5 text-xs text-slate-500">
+            <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
+            <span>
+              Protected by HttpOnly HMAC-SHA256 sessions, OAuth 2.0 CSRF state verification, and AES-256-GCM encrypted token storage.
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Toast Notification */}
@@ -321,6 +407,20 @@ export default function OfferDashboardPage() {
               <Plus className="h-4 w-4" />
               Connect Email Account
             </button>
+
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
+              <span className="hidden text-xs font-medium text-slate-600 md:inline">
+                {authUser.email}
+              </span>
+              <button
+                onClick={handleSignOut}
+                title="Sign out"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-rose-50 hover:text-rose-600"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Sign Out</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>

@@ -14,7 +14,8 @@ export interface ScanSummary {
  */
 export async function runOfferScan(
   triggerType: 'manual' | 'nightly_cron' = 'manual',
-  specificAccountId?: string
+  specificAccountId?: string,
+  userId?: string
 ): Promise<ScanSummary> {
   const scanLog = await prisma.scanLog.create({
     data: {
@@ -28,8 +29,12 @@ export async function runOfferScan(
   let offersExtracted = 0;
 
   try {
+    const whereFilter: any = {};
+    if (specificAccountId) whereFilter.id = specificAccountId;
+    if (userId) whereFilter.userId = userId;
+
     const accounts = await prisma.emailAccount.findMany({
-      where: specificAccountId ? { id: specificAccountId } : undefined,
+      where: Object.keys(whereFilter).length > 0 ? whereFilter : undefined,
     });
 
     for (const account of accounts) {

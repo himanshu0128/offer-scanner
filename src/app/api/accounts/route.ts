@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getGoogleAuthUrl, revokeGoogleToken } from '@/lib/gmail';
-import { runOfferScan } from '@/lib/scanner';
+import { revokeGoogleToken } from '@/lib/gmail';
 import { decryptToken } from '@/lib/crypto';
+import { getSessionFromRequest } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const session = getSessionFromRequest(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const accounts = await prisma.emailAccount.findMany({
+      where: { userId: session.userId },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
@@ -38,70 +44,28 @@ export async function GET() {
   }
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-
-    // Option 1: Start Google OAuth flow to connect a real Gmail account
-    if (body.action === 'google_oauth') {
-      if (
-        !process.env.GOOGLE_CLIENT_ID ||
-        process.env.GOOGLE_CLIENT_ID === 'your-google-client-id.apps.googleusercontent.com'
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              'GOOGLE_CLIENT_ID is not configured in .env yet. You can add a Demo Inbox account right now or set GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET.',
-          },
-          { status: 400 }
-        );
-      }
-      const url = getGoogleAuthUrl();
-      return NextResponse.json({ authUrl: url });
-    }
-
-    // Option 2: Connect a Demo / Custom Email Account for immediate testing & multi-inbox demo
-    if (body.email) {
-      const email = String(body.email).trim().toLowerCase();
-      const account = await prisma.emailAccount.upsert({
-        where: { email },
-        update: { status: 'active' },
-        create: {
-          email,
-          provider: body.provider || 'demo',
-          status: 'active',
-        },
-      });
-
-      // Automatically trigger an initial 30-day scan for the newly added account
-      await runOfferScan('manual', account.id);
-
-      return NextResponse.json({ account });
-    }
-
-    return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
-  } catch (error: any) {
-    console.error('Error adding email account:', error);
-    return NextResponse.json(
-      { error: 'Failed to connect email account', details: error?.message },
-      { status: 500 }
-    );
-  }
-}
-
 export async function DELETE(req: NextRequest) {
   try {
+    const session = getSessionFromRequest(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     if (!id) {
       return NextResponse.json({ error: 'Account ID required' }, { status: 400 });
     }
 
-    const existing = await prisma.emailAccount.findUnique({
-      where: { id },
+    const existing = await prisma.emailAccount.findFirst({
+      where: { id, userId: session.userId },
     });
 
-    if (existing && existing.provider === 'google') {
+    if (!existing) {
+      return NextResponse.json({ error: 'Account not found or unauthorized' }, { status: 404 });
+    }
+
+    if (existing.provider === 'google') {
       const refreshOrAccess =
         decryptToken(existing.refreshToken) || decryptToken(existing.accessToken);
       if (refreshOrAccess) {
@@ -110,7 +74,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     await prisma.emailAccount.delete({
-      where: { id },
+      where: { id: existing.id },
     });
 
     return NextResponse.json({ success: true });

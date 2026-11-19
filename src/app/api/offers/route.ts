@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
   try {
+    const session = getSessionFromRequest(req);
+    if (!session) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const category = searchParams.get('category');
     const codeOnly = searchParams.get('codeOnly') === 'true';
@@ -15,6 +21,9 @@ export async function GET(req: NextRequest) {
 
     const whereClause: any = {
       isDismissed: false,
+      emailAccount: {
+        userId: session.userId,
+      },
     };
 
     if (category && category !== 'All') {
