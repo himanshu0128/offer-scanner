@@ -1,6 +1,9 @@
 import { prisma } from './prisma';
 import { fetchLast30DaysPromotionalEmails, RawEmailMessage } from './gmail';
-import { extractOfferFromEmail, getMerchantLogoUrl } from './extractor';
+import {
+  extractOffersFromEmailBatch,
+  getMerchantLogoUrl,
+} from './extractor';
 import { decryptToken, encryptToken, sanitizeExternalUrl } from './crypto';
 
 export interface ScanSummary {
@@ -15,7 +18,8 @@ export interface ScanSummary {
 export async function runOfferScan(
   triggerType: 'manual' | 'nightly_cron' = 'manual',
   specificAccountId?: string,
-  userId?: string
+  userId?: string,
+  forceRescan: boolean = false
 ): Promise<ScanSummary> {
   const scanLog = await prisma.scanLog.create({
     data: {
@@ -36,6 +40,15 @@ export async function runOfferScan(
     const accounts = await prisma.emailAccount.findMany({
       where: Object.keys(whereFilter).length > 0 ? whereFilter : undefined,
     });
+
+    if (forceRescan && accounts.length > 0) {
+      await prisma.offer.deleteMany({
+        where: {
+          emailAccountId: { in: accounts.map((a) => a.id) },
+          isDismissed: false,
+        },
+      });
+    }
 
     for (const account of accounts) {
       await prisma.emailAccount.update({
@@ -95,8 +108,7 @@ export async function runOfferScan(
 
       emailsProcessed += emails.length;
 
-      // Extract offers in parallel batches of 5 for fast serverless completion
-      const extractBatchSize = 5;
+      // Extract offers using batched AI + precision heuristic parser
       const newOffersToInsert: Array<{
         emailAccountId: string;
         messageId: string;
@@ -113,39 +125,32 @@ export async function runOfferScan(
         expiresAt: Date | null;
       }> = [];
 
-      for (let i = 0; i < newEmails.length; i += extractBatchSize) {
-        const batch = newEmails.slice(i, i + extractBatchSize);
-        const extractedResults = await Promise.all(
-          batch.map(async (email) => {
-            const extracted = await extractOfferFromEmail(email);
-            return { email, extracted };
-          })
+      const extractedMap = await extractOffersFromEmailBatch(newEmails);
+
+      for (const email of newEmails) {
+        const extracted = extractedMap.get(email.messageId);
+        if (!extracted || !extracted.isOffer) continue;
+
+        const merchantLogo = getMerchantLogoUrl(
+          extracted.merchantDomain,
+          extracted.merchantName
         );
 
-        for (const { email, extracted } of extractedResults) {
-          if (!extracted || !extracted.isOffer) continue;
-
-          const merchantLogo = getMerchantLogoUrl(
-            extracted.merchantDomain,
-            extracted.merchantName
-          );
-
-          newOffersToInsert.push({
-            emailAccountId: account.id,
-            messageId: email.messageId,
-            merchantName: extracted.merchantName,
-            merchantDomain: extracted.merchantDomain,
-            merchantLogo,
-            title: extracted.title,
-            description: extracted.description,
-            promoCode: extracted.promoCode,
-            category: extracted.category,
-            discountValue: extracted.discountValue,
-            offerUrl: sanitizeExternalUrl(extracted.offerUrl),
-            receivedAt: email.receivedAt,
-            expiresAt: extracted.expiresAt ? new Date(extracted.expiresAt) : null,
-          });
-        }
+        newOffersToInsert.push({
+          emailAccountId: account.id,
+          messageId: email.messageId,
+          merchantName: extracted.merchantName,
+          merchantDomain: extracted.merchantDomain,
+          merchantLogo,
+          title: extracted.title,
+          description: extracted.description,
+          promoCode: extracted.promoCode,
+          category: extracted.category,
+          discountValue: extracted.discountValue,
+          offerUrl: sanitizeExternalUrl(extracted.offerUrl),
+          receivedAt: email.receivedAt,
+          expiresAt: extracted.expiresAt ? new Date(extracted.expiresAt) : null,
+        });
       }
 
       if (newOffersToInsert.length > 0) {

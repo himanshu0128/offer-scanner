@@ -52,6 +52,7 @@ export interface RawEmailMessage {
 
 /**
  * Fetches promotional/offer emails from the last 30 days for a connected Gmail account.
+ * Excludes 2FA/OTP codes, transactional receipts, shipping updates, and security alerts.
  */
 export async function fetchLast30DaysPromotionalEmails(
   accessToken: string,
@@ -76,21 +77,24 @@ export async function fetchLast30DaysPromotionalEmails(
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-  // Look back 30 days for promotional / offer emails
-  const query =
-    'newer_than:30d (category:promotions OR "off" OR "discount" OR "promo" OR "code" OR "coupon" OR "deal" OR "sale" OR "offer")';
+  // Precision 30-day promotional query with explicit transactional/OTP noise exclusions
+  const query = [
+    'newer_than:30d',
+    '(category:promotions OR "% off" OR "$ off" OR "promo code" OR "use code" OR "coupon" OR "free shipping" OR "flash sale" OR "bogo")',
+    '-subject:("verification code" OR "security code" OR "login code" OR "passcode" OR "one-time" OR "OTP" OR "order confirmation" OR "receipt" OR "invoice" OR "shipped" OR "delivered" OR "password reset" OR "security alert" OR "two-factor" OR "2-step")',
+  ].join(' ');
 
   const listRes = await gmail.users.messages.list({
     userId: 'me',
     q: query,
-    maxResults: 25,
+    maxResults: 80,
   });
 
   const messages = listRes.data.messages || [];
 
-  // Fetch message details in parallel batches of 10 so scans finish well within Vercel's serverless timeout
+  // Fetch message details in parallel batches of 15 for fast serverless execution
   const results: RawEmailMessage[] = [];
-  const batchSize = 10;
+  const batchSize = 15;
 
   for (let i = 0; i < messages.length; i += batchSize) {
     const batch = messages.slice(i, i + batchSize);
@@ -113,16 +117,17 @@ export async function fetchLast30DaysPromotionalEmails(
             headers.find((h) => h.name?.toLowerCase() === 'date')?.value || '';
 
           const receivedAt = dateStr ? new Date(dateStr) : new Date();
-          const snippet = detail.data.snippet || '';
-          const bodyText =
-            extractPlainTextFromPayload(detail.data.payload) || snippet;
+          const snippet = decodeHtmlEntities(detail.data.snippet || '');
+          const bodyText = decodeHtmlEntities(
+            extractPlainTextFromPayload(detail.data.payload) || snippet
+          );
 
           return {
             messageId: msg.id,
             from,
-            subject,
+            subject: decodeHtmlEntities(subject),
             snippet,
-            bodyText: bodyText.slice(0, 4000),
+            bodyText: bodyText.slice(0, 3500),
             receivedAt,
           } as RawEmailMessage;
         } catch (err) {
@@ -140,6 +145,17 @@ export async function fetchLast30DaysPromotionalEmails(
   return results;
 }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&ndash;/g, '–')
+    .replace(/&mdash;/g, '—')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+}
+
 function extractPlainTextFromPayload(payload: any): string {
   if (!payload) return '';
 
@@ -149,6 +165,11 @@ function extractPlainTextFromPayload(payload: any): string {
 
   if (payload.parts && Array.isArray(payload.parts)) {
     for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
+        return Buffer.from(part.body.data, 'base64').toString('utf-8');
+      }
+    }
+    for (const part of payload.parts) {
       const text = extractPlainTextFromPayload(part);
       if (text) return text;
     }
@@ -156,10 +177,12 @@ function extractPlainTextFromPayload(payload: any): string {
 
   if (payload.body?.data) {
     const rawHtml = Buffer.from(payload.body.data, 'base64').toString('utf-8');
-    return rawHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-                  .replace(/<[^>]+>/g, ' ')
-                  .replace(/\s+/g, ' ')
-                  .trim();
+    return rawHtml
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   return '';

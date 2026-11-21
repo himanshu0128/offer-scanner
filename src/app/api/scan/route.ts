@@ -13,8 +13,9 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     const accountId = body?.accountId || undefined;
+    const forceRescan = Boolean(body?.forceRescan);
 
-    const summary = await runOfferScan('manual', accountId, session.userId);
+    const summary = await runOfferScan('manual', accountId, session.userId, forceRescan);
     return NextResponse.json({
       success: true,
       message: `Scanned ${summary.accountsScanned} account(s) (last 30 days) and found ${summary.offersExtracted} new offer(s).`,

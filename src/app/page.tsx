@@ -201,7 +201,7 @@ export default function OfferDashboardPage() {
     setOffers([]);
   };
 
-  const handleManualRefresh = async () => {
+  const handleManualRefresh = async (forceRescan: boolean = false) => {
     setScanning(true);
     setLastErrorBanner(null);
     try {
@@ -210,6 +210,7 @@ export default function OfferDashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           accountId: selectedEmailId !== 'all' ? selectedEmailId : undefined,
+          forceRescan,
         }),
       });
       const rawText = await res.text();
@@ -494,7 +495,7 @@ export default function OfferDashboardPage() {
             </div>
 
             <button
-              onClick={handleManualRefresh}
+              onClick={() => handleManualRefresh(false)}
               disabled={scanning}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
             >
@@ -502,6 +503,16 @@ export default function OfferDashboardPage() {
                 className={`h-4 w-4 text-indigo-600 ${scanning ? 'animate-spin' : ''}`}
               />
               {scanning ? 'Scanning 30 Days...' : 'Manual Refresh'}
+            </button>
+
+            <button
+              onClick={() => handleManualRefresh(true)}
+              disabled={scanning}
+              title="Re-parse all non-dismissed offers from the last 30 days using the latest deal extractor"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-xs font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-100 disabled:opacity-60"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Deep Re-Scan
             </button>
 
             <button
