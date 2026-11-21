@@ -113,12 +113,14 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    // Scan last 30 days only if this account hasn't been scanned in the last 10 minutes
+    // Scan last 30 days synchronously if this is a brand new account or hasn't been scanned in 10 minutes
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     if (!account.lastScanned || account.lastScanned < tenMinutesAgo) {
-      runOfferScan('manual', account.id).catch((err) =>
-        console.error('Background initial scan error:', err)
-      );
+      try {
+        await runOfferScan('manual', account.id);
+      } catch (err) {
+        console.error('Initial scan error during OAuth callback:', err);
+      }
     }
 
     const sessionToken = createSessionToken({

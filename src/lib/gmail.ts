@@ -83,43 +83,57 @@ export async function fetchLast30DaysPromotionalEmails(
   const listRes = await gmail.users.messages.list({
     userId: 'me',
     q: query,
-    maxResults: 50,
+    maxResults: 25,
   });
 
   const messages = listRes.data.messages || [];
+
+  // Fetch message details in parallel batches of 10 so scans finish well within Vercel's serverless timeout
   const results: RawEmailMessage[] = [];
+  const batchSize = 10;
 
-  for (const msg of messages) {
-    if (!msg.id) continue;
-    try {
-      const detail = await gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id,
-        format: 'full',
-      });
+  for (let i = 0; i < messages.length; i += batchSize) {
+    const batch = messages.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (msg) => {
+        if (!msg.id) return null;
+        try {
+          const detail = await gmail.users.messages.get({
+            userId: 'me',
+            id: msg.id,
+            format: 'full',
+          });
 
-      const headers = detail.data.payload?.headers || [];
-      const subject =
-        headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
-      const from =
-        headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
-      const dateStr =
-        headers.find((h) => h.name?.toLowerCase() === 'date')?.value || '';
+          const headers = detail.data.payload?.headers || [];
+          const subject =
+            headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
+          const from =
+            headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
+          const dateStr =
+            headers.find((h) => h.name?.toLowerCase() === 'date')?.value || '';
 
-      const receivedAt = dateStr ? new Date(dateStr) : new Date();
-      const snippet = detail.data.snippet || '';
-      const bodyText = extractPlainTextFromPayload(detail.data.payload) || snippet;
+          const receivedAt = dateStr ? new Date(dateStr) : new Date();
+          const snippet = detail.data.snippet || '';
+          const bodyText =
+            extractPlainTextFromPayload(detail.data.payload) || snippet;
 
-      results.push({
-        messageId: msg.id,
-        from,
-        subject,
-        snippet,
-        bodyText: bodyText.slice(0, 6000), // Limit context window size for LLM
-        receivedAt,
-      });
-    } catch (err) {
-      console.error(`Failed to fetch message ${msg.id}:`, err);
+          return {
+            messageId: msg.id,
+            from,
+            subject,
+            snippet,
+            bodyText: bodyText.slice(0, 4000),
+            receivedAt,
+          } as RawEmailMessage;
+        } catch (err) {
+          console.error(`Failed to fetch message ${msg.id}:`, err);
+          return null;
+        }
+      })
+    );
+
+    for (const item of batchResults) {
+      if (item) results.push(item);
     }
   }
 

@@ -46,9 +46,10 @@ export function getMerchantLogoUrl(domain: string | null, merchantName: string):
 export async function extractOfferFromEmail(
   email: RawEmailMessage
 ): Promise<ExtractedOffer | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
 
-  if (apiKey && apiKey !== 'your-gemini-api-key') {
+  // Standard Gemini API keys from Google AI Studio always start with "AIza"
+  if (apiKey && apiKey.startsWith('AIza')) {
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({

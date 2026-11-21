@@ -69,48 +69,65 @@ export async function runOfferScan(
 
       accountsScanned++;
 
-      for (const email of emails) {
-        emailsProcessed++;
+      // Deduplicate in a single batch query instead of 1 query per message
+      const existingOffers = await prisma.offer.findMany({
+        where: {
+          emailAccountId: account.id,
+          messageId: { in: emails.map((e) => e.messageId) },
+        },
+        select: { messageId: true },
+      });
+      const existingIds = new Set(existingOffers.map((o) => o.messageId));
+      const newEmails = emails.filter((e) => !existingIds.has(e.messageId));
 
-        // Skip if already processed for this email account
-        const existing = await prisma.offer.findUnique({
-          where: {
-            emailAccountId_messageId: {
-              emailAccountId: account.id,
-              messageId: email.messageId,
-            },
-          },
-        });
+      emailsProcessed += emails.length;
 
-        if (existing) continue;
-
-        const extracted = await extractOfferFromEmail(email);
-        if (!extracted || !extracted.isOffer) continue;
-
-        const merchantLogo = getMerchantLogoUrl(
-          extracted.merchantDomain,
-          extracted.merchantName
+      // Extract offers in parallel batches of 5 for fast serverless completion
+      const extractBatchSize = 5;
+      for (let i = 0; i < newEmails.length; i += extractBatchSize) {
+        const batch = newEmails.slice(i, i + extractBatchSize);
+        const extractedResults = await Promise.all(
+          batch.map(async (email) => {
+            const extracted = await extractOfferFromEmail(email);
+            return { email, extracted };
+          })
         );
 
-        await prisma.offer.create({
-          data: {
-            emailAccountId: account.id,
-            messageId: email.messageId,
-            merchantName: extracted.merchantName,
-            merchantDomain: extracted.merchantDomain,
-            merchantLogo,
-            title: extracted.title,
-            description: extracted.description,
-            promoCode: extracted.promoCode,
-            category: extracted.category,
-            discountValue: extracted.discountValue,
-            offerUrl: sanitizeExternalUrl(extracted.offerUrl),
-            receivedAt: email.receivedAt,
-            expiresAt: extracted.expiresAt ? new Date(extracted.expiresAt) : null,
-          },
-        });
+        for (const { email, extracted } of extractedResults) {
+          if (!extracted || !extracted.isOffer) continue;
 
-        offersExtracted++;
+          const merchantLogo = getMerchantLogoUrl(
+            extracted.merchantDomain,
+            extracted.merchantName
+          );
+
+          await prisma.offer.upsert({
+            where: {
+              emailAccountId_messageId: {
+                emailAccountId: account.id,
+                messageId: email.messageId,
+              },
+            },
+            update: {},
+            create: {
+              emailAccountId: account.id,
+              messageId: email.messageId,
+              merchantName: extracted.merchantName,
+              merchantDomain: extracted.merchantDomain,
+              merchantLogo,
+              title: extracted.title,
+              description: extracted.description,
+              promoCode: extracted.promoCode,
+              category: extracted.category,
+              discountValue: extracted.discountValue,
+              offerUrl: sanitizeExternalUrl(extracted.offerUrl),
+              receivedAt: email.receivedAt,
+              expiresAt: extracted.expiresAt ? new Date(extracted.expiresAt) : null,
+            },
+          });
+
+          offersExtracted++;
+        }
       }
 
       await prisma.emailAccount.update({

@@ -193,12 +193,16 @@ export default function OfferDashboardPage() {
           accountId: selectedEmailId !== 'all' ? selectedEmailId : undefined,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         showToast(data.message || 'Scan completed!');
         await Promise.all([fetchAccounts(), fetchOffers()]);
       } else {
-        showToast(data.error || 'Failed to run scan.');
+        showToast(
+          data.details
+            ? `${data.error}: ${data.details}`
+            : data.error || 'Failed to run scan.'
+        );
       }
     } catch (err) {
       showToast('Error triggering manual scan.');

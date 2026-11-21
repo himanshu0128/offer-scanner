@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runOfferScan } from '@/lib/scanner';
 import { getSessionFromRequest } from '@/lib/auth';
 
+export const maxDuration = 60; // Allow up to 60s on Vercel Hobby/Pro
+
 export async function POST(req: NextRequest) {
   try {
     const session = getSessionFromRequest(req);
