@@ -66,22 +66,23 @@ export async function GET(req: NextRequest) {
       sessionUserName = existingSession.name;
       sessionUserPicture = existingSession.picture;
     } else {
-      // Always consolidate onto the primary user who owns connected accounts if one exists
-      const primaryAccountOwner = await prisma.emailAccount.findFirst({
-        where: { userId: { not: null } },
-        orderBy: { createdAt: 'asc' },
+      // If this Gmail address is already linked as an EmailAccount to an existing User, sign into that User
+      const existingLinkedAccount = await prisma.emailAccount.findUnique({
+        where: { email },
+        include: { user: true },
       });
 
-      userId = primaryAccountOwner?.userId || user.id;
-      sessionUserEmail = user.email;
-      sessionUserName = user.name;
-      sessionUserPicture = user.picture;
-
-      // Claim any orphan EmailAccounts
-      await prisma.emailAccount.updateMany({
-        where: { userId: null },
-        data: { userId },
-      });
+      if (existingLinkedAccount?.userId && existingLinkedAccount.user) {
+        userId = existingLinkedAccount.userId;
+        sessionUserEmail = existingLinkedAccount.user.email;
+        sessionUserName = existingLinkedAccount.user.name;
+        sessionUserPicture = existingLinkedAccount.user.picture;
+      } else {
+        userId = user.id;
+        sessionUserEmail = user.email;
+        sessionUserName = user.name;
+        sessionUserPicture = user.picture;
+      }
     }
 
     const encryptedAccess = encryptToken(tokens.access_token);
