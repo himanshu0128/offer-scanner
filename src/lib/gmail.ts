@@ -50,15 +50,21 @@ export interface RawEmailMessage {
   receivedAt: Date;
 }
 
+export interface FetchPromotionalEmailsResult {
+  totalMatchingIn30Days: number;
+  newEmailsFetched: RawEmailMessage[];
+}
+
 /**
- * Fetches promotional/offer emails from the last 30 days for a connected Gmail account.
- * Excludes 2FA/OTP codes, transactional receipts, shipping updates, and security alerts.
+ * Fetches ALL promotional/offer emails from the last 30 days for a connected Gmail account
+ * using full pagination (`nextPageToken`) and pre-fetch deduplication (`knownMessageIds`).
  */
 export async function fetchLast30DaysPromotionalEmails(
   accessToken: string,
   refreshToken?: string | null,
-  onTokenRefreshed?: (newAccessToken: string, expiryDate?: number | null) => Promise<void>
-): Promise<RawEmailMessage[]> {
+  onTokenRefreshed?: (newAccessToken: string, expiryDate?: number | null) => Promise<void>,
+  knownMessageIds?: Set<string>
+): Promise<FetchPromotionalEmailsResult> {
   const oauth2Client = getGoogleOAuthClient();
   oauth2Client.setCredentials({
     access_token: accessToken,
@@ -84,27 +90,43 @@ export async function fetchLast30DaysPromotionalEmails(
     '-subject:("verification code" OR "security code" OR "login code" OR "passcode" OR "one-time" OR "OTP" OR "order confirmation" OR "receipt" OR "invoice" OR "shipped" OR "delivered" OR "password reset" OR "security alert" OR "two-factor" OR "2-step")',
   ].join(' ');
 
-  const listRes = await gmail.users.messages.list({
-    userId: 'me',
-    q: query,
-    maxResults: 80,
-  });
+  // 1. Paginate through ALL matching message IDs in the 30-day window (up to 500 per page)
+  const allMessageIds: string[] = [];
+  let pageToken: string | undefined = undefined;
 
-  const messages = listRes.data.messages || [];
+  do {
+    const listRes: any = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 500,
+      pageToken,
+    });
 
-  // Fetch message details in parallel batches of 15 for fast serverless execution
+    const pageMessages = listRes.data.messages || [];
+    for (const m of pageMessages) {
+      if (m.id) allMessageIds.push(m.id);
+    }
+
+    pageToken = listRes.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  // 2. Skip messages we have already scanned into PostgreSQL before making detail API calls
+  const idsToFetch = knownMessageIds
+    ? allMessageIds.filter((id) => !knownMessageIds.has(id))
+    : allMessageIds;
+
+  // 3. Fetch message details in high-throughput parallel batches of 25
   const results: RawEmailMessage[] = [];
-  const batchSize = 15;
+  const batchSize = 25;
 
-  for (let i = 0; i < messages.length; i += batchSize) {
-    const batch = messages.slice(i, i + batchSize);
+  for (let i = 0; i < idsToFetch.length; i += batchSize) {
+    const batch = idsToFetch.slice(i, i + batchSize);
     const batchResults = await Promise.all(
-      batch.map(async (msg) => {
-        if (!msg.id) return null;
+      batch.map(async (msgId) => {
         try {
           const detail = await gmail.users.messages.get({
             userId: 'me',
-            id: msg.id,
+            id: msgId,
             format: 'full',
           });
 
@@ -123,7 +145,7 @@ export async function fetchLast30DaysPromotionalEmails(
           );
 
           return {
-            messageId: msg.id,
+            messageId: msgId,
             from,
             subject: decodeHtmlEntities(subject),
             snippet,
@@ -131,7 +153,7 @@ export async function fetchLast30DaysPromotionalEmails(
             receivedAt,
           } as RawEmailMessage;
         } catch (err) {
-          console.error(`Failed to fetch message ${msg.id}:`, err);
+          console.error(`Failed to fetch message ${msgId}:`, err);
           return null;
         }
       })
@@ -142,7 +164,10 @@ export async function fetchLast30DaysPromotionalEmails(
     }
   }
 
-  return results;
+  return {
+    totalMatchingIn30Days: allMessageIds.length,
+    newEmailsFetched: results,
+  };
 }
 
 function decodeHtmlEntities(text: string): string {

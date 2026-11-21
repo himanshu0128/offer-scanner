@@ -56,7 +56,15 @@ export async function runOfferScan(
         data: { status: 'scanning' },
       });
 
-      let emails: RawEmailMessage[] = [];
+      // Load already-known message IDs for this account BEFORE fetching message payloads from Gmail
+      const existingOffers = await prisma.offer.findMany({
+        where: { emailAccountId: account.id },
+        select: { messageId: true },
+      });
+      const knownMessageIds = new Set(existingOffers.map((o) => o.messageId));
+
+      let newEmails: RawEmailMessage[] = [];
+      let totalMatchingIn30Days = 0;
 
       try {
         if (account.provider === 'google' && account.accessToken) {
@@ -67,7 +75,7 @@ export async function runOfferScan(
               `Failed to decrypt accessToken for ${account.email}. Check TOKEN_ENCRYPTION_KEY.`
             );
           }
-          emails = await fetchLast30DaysPromotionalEmails(
+          const fetched = await fetchLast30DaysPromotionalEmails(
             plainAccessToken,
             plainRefreshToken,
             async (newAccessToken, expiryDate) => {
@@ -78,10 +86,15 @@ export async function runOfferScan(
                   expiresAt: expiryDate ? Math.floor(expiryDate / 1000) : undefined,
                 },
               });
-            }
+            },
+            knownMessageIds
           );
+          newEmails = fetched.newEmailsFetched;
+          totalMatchingIn30Days = fetched.totalMatchingIn30Days;
         } else if (account.provider === 'demo') {
-          emails = getDemoInboxEmailsForLast30Days(account.email);
+          const demoAll = getDemoInboxEmailsForLast30Days(account.email);
+          totalMatchingIn30Days = demoAll.length;
+          newEmails = demoAll.filter((e) => !knownMessageIds.has(e.messageId));
         } else {
           throw new Error(`No access token stored for ${account.email}. Try reconnecting the account.`);
         }
@@ -94,19 +107,7 @@ export async function runOfferScan(
       }
 
       accountsScanned++;
-
-      // Deduplicate in a single batch query instead of 1 query per message
-      const existingOffers = await prisma.offer.findMany({
-        where: {
-          emailAccountId: account.id,
-          messageId: { in: emails.map((e) => e.messageId) },
-        },
-        select: { messageId: true },
-      });
-      const existingIds = new Set(existingOffers.map((o) => o.messageId));
-      const newEmails = emails.filter((e) => !existingIds.has(e.messageId));
-
-      emailsProcessed += emails.length;
+      emailsProcessed += totalMatchingIn30Days;
 
       // Extract offers using batched AI + precision heuristic parser
       const newOffersToInsert: Array<{
