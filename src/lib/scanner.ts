@@ -97,6 +97,22 @@ export async function runOfferScan(
 
       // Extract offers in parallel batches of 5 for fast serverless completion
       const extractBatchSize = 5;
+      const newOffersToInsert: Array<{
+        emailAccountId: string;
+        messageId: string;
+        merchantName: string;
+        merchantDomain: string | null;
+        merchantLogo: string;
+        title: string;
+        description: string;
+        promoCode: string | null;
+        category: string;
+        discountValue: string | null;
+        offerUrl: string | null;
+        receivedAt: Date;
+        expiresAt: Date | null;
+      }> = [];
+
       for (let i = 0; i < newEmails.length; i += extractBatchSize) {
         const batch = newEmails.slice(i, i + extractBatchSize);
         const extractedResults = await Promise.all(
@@ -114,33 +130,30 @@ export async function runOfferScan(
             extracted.merchantName
           );
 
-          await prisma.offer.upsert({
-            where: {
-              emailAccountId_messageId: {
-                emailAccountId: account.id,
-                messageId: email.messageId,
-              },
-            },
-            update: {},
-            create: {
-              emailAccountId: account.id,
-              messageId: email.messageId,
-              merchantName: extracted.merchantName,
-              merchantDomain: extracted.merchantDomain,
-              merchantLogo,
-              title: extracted.title,
-              description: extracted.description,
-              promoCode: extracted.promoCode,
-              category: extracted.category,
-              discountValue: extracted.discountValue,
-              offerUrl: sanitizeExternalUrl(extracted.offerUrl),
-              receivedAt: email.receivedAt,
-              expiresAt: extracted.expiresAt ? new Date(extracted.expiresAt) : null,
-            },
+          newOffersToInsert.push({
+            emailAccountId: account.id,
+            messageId: email.messageId,
+            merchantName: extracted.merchantName,
+            merchantDomain: extracted.merchantDomain,
+            merchantLogo,
+            title: extracted.title,
+            description: extracted.description,
+            promoCode: extracted.promoCode,
+            category: extracted.category,
+            discountValue: extracted.discountValue,
+            offerUrl: sanitizeExternalUrl(extracted.offerUrl),
+            receivedAt: email.receivedAt,
+            expiresAt: extracted.expiresAt ? new Date(extracted.expiresAt) : null,
           });
-
-          offersExtracted++;
         }
+      }
+
+      if (newOffersToInsert.length > 0) {
+        const inserted = await prisma.offer.createMany({
+          data: newOffersToInsert,
+          skipDuplicates: true,
+        });
+        offersExtracted += inserted.count;
       }
 
       await prisma.emailAccount.update({
