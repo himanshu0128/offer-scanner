@@ -62,6 +62,15 @@ interface Offer {
   isDismissed: boolean;
 }
 
+interface ClubbedOffer extends Offer {
+  offerIds: string[];
+  emailAccounts: Array<{
+    id: string;
+    email: string;
+    provider: string;
+  }>;
+}
+
 const CATEGORIES = [
   'All',
   'Fashion',
@@ -231,19 +240,48 @@ export default function OfferDashboardPage() {
     }
   };
 
-  const handleDismissOffer = async (offerId: string) => {
-    // Optimistically remove from UI
-    setOffers((prev) => prev.filter((o) => o.id !== offerId));
+  const handleDismissOffer = async (offerIds: string[]) => {
+    const idSet = new Set(offerIds);
+    // Optimistically remove all clubbed instances from UI
+    setOffers((prev) => prev.filter((o) => !idSet.has(o.id)));
     try {
-      const res = await fetch(`/api/offers/${offerId}/dismiss`, {
+      const res = await fetch('/api/offers/dismiss-merchant', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offerIds }),
       });
       if (res.ok) {
-        showToast('Offer dismissed from listing.');
+        showToast(
+          offerIds.length > 1
+            ? `Offer dismissed across ${offerIds.length} emails.`
+            : 'Offer dismissed from listing.'
+        );
         fetchAccounts();
       }
     } catch (err) {
       console.error('Failed to dismiss offer', err);
+      fetchOffers();
+    }
+  };
+
+  const handleDismissByMerchant = async (merchantName: string) => {
+    const normalized = merchantName.trim().toLowerCase();
+    setOffers((prev) =>
+      prev.filter((o) => o.merchantName.trim().toLowerCase() !== normalized)
+    );
+    try {
+      const res = await fetch('/api/offers/dismiss-merchant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ merchantName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast(data.message || `Dismissed all offers from ${merchantName}.`);
+        fetchAccounts();
+      }
+    } catch (err) {
+      console.error('Failed to dismiss merchant offers', err);
       fetchOffers();
     }
   };
@@ -307,16 +345,52 @@ export default function OfferDashboardPage() {
     }
   };
 
-  // Group offers by merchant
-  const offersByMerchant = useMemo(() => {
-    const groups: Record<string, Offer[]> = {};
+  // Club identical offers across multiple email accounts into a single card
+  const clubbedOffers = useMemo<ClubbedOffer[]>(() => {
+    const map = new Map<string, ClubbedOffer>();
+
     for (const offer of offers) {
+      const merchantKey = offer.merchantName.trim().toLowerCase();
+      // Group by merchant + promoCode (if present) OR merchant + normalized title
+      const identityKey = offer.promoCode
+        ? `${merchantKey}::code::${offer.promoCode.trim().toUpperCase()}`
+        : `${merchantKey}::title::${offer.title
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')}`;
+
+      const existing = map.get(identityKey);
+      if (!existing) {
+        map.set(identityKey, {
+          ...offer,
+          offerIds: [offer.id],
+          emailAccounts: [offer.emailAccount],
+        });
+      } else {
+        existing.offerIds.push(offer.id);
+        if (!existing.emailAccounts.some((e) => e.email === offer.emailAccount.email)) {
+          existing.emailAccounts.push(offer.emailAccount);
+        }
+        // Keep the latest expiration date if one has an expiry and the other doesn't
+        if (!existing.expiresAt && offer.expiresAt) {
+          existing.expiresAt = offer.expiresAt;
+        }
+      }
+    }
+
+    return Array.from(map.values());
+  }, [offers]);
+
+  // Group clubbed offers by merchant
+  const offersByMerchant = useMemo(() => {
+    const groups: Record<string, ClubbedOffer[]> = {};
+    for (const offer of clubbedOffers) {
       const key = offer.merchantName;
       if (!groups[key]) groups[key] = [];
       groups[key].push(offer);
     }
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [offers]);
+  }, [clubbedOffers]);
 
   const formatExpiry = (expiresAt: string | null) => {
     if (!expiresAt) return { label: 'No expiration listed', urgent: false };
@@ -699,19 +773,29 @@ export default function OfferDashboardPage() {
               const sample = merchantOffers[0];
               return (
                 <div key={merchantName} className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <MerchantAvatar
-                      name={merchantName}
-                      logo={sample.merchantLogo}
-                      size="sm"
-                    />
-                    <h2 className="text-base font-bold text-slate-900">
-                      {merchantName}
-                    </h2>
-                    <span className="rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
-                      {merchantOffers.length}{' '}
-                      {merchantOffers.length === 1 ? 'offer' : 'offers'}
-                    </span>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <MerchantAvatar
+                        name={merchantName}
+                        logo={sample.merchantLogo}
+                        size="sm"
+                      />
+                      <h2 className="text-base font-bold text-slate-900">
+                        {merchantName}
+                      </h2>
+                      <span className="rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
+                        {merchantOffers.length}{' '}
+                        {merchantOffers.length === 1 ? 'offer' : 'offers'}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => handleDismissByMerchant(merchantName)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Dismiss All {merchantName}
+                    </button>
                   </div>
 
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -722,6 +806,7 @@ export default function OfferDashboardPage() {
                         copiedId={copiedId}
                         onCopyCode={handleCopyCode}
                         onDismiss={handleDismissOffer}
+                        onDismissMerchant={handleDismissByMerchant}
                         formatExpiry={formatExpiry}
                       />
                     ))}
@@ -732,13 +817,14 @@ export default function OfferDashboardPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {offers.map((offer) => (
+            {clubbedOffers.map((offer) => (
               <OfferCard
                 key={offer.id}
                 offer={offer}
                 copiedId={copiedId}
                 onCopyCode={handleCopyCode}
                 onDismiss={handleDismissOffer}
+                onDismissMerchant={handleDismissByMerchant}
                 formatExpiry={formatExpiry}
               />
             ))}
@@ -886,19 +972,21 @@ function OfferCard({
   copiedId,
   onCopyCode,
   onDismiss,
+  onDismissMerchant,
   formatExpiry,
 }: {
-  offer: Offer;
+  offer: ClubbedOffer;
   copiedId: string | null;
   onCopyCode: (id: string, code: string) => void;
-  onDismiss: (id: string) => void;
+  onDismiss: (offerIds: string[]) => void;
+  onDismissMerchant: (merchantName: string) => void;
   formatExpiry: (exp: string | null) => { label: string; urgent: boolean };
 }) {
   const expiry = formatExpiry(offer.expiresAt);
 
   return (
     <div className="group relative flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-      {/* Top Row: Merchant Logo + Name + Dismiss button */}
+      {/* Top Row: Merchant Logo + Name + Dismiss actions */}
       <div>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -912,19 +1000,35 @@ function OfferCard({
                   </span>
                 )}
               </div>
-              <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                {offer.category}
-              </span>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                  {offer.category}
+                </span>
+                {offer.emailAccounts.length > 1 && (
+                  <span className="inline-block rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                    In {offer.emailAccounts.length} inboxes
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          <button
-            onClick={() => onDismiss(offer.id)}
-            title="Dismiss offer from listing"
-            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onDismissMerchant(offer.merchantName)}
+              title={`Dismiss all offers from ${offer.merchantName}`}
+              className="rounded-lg px-2 py-1 text-[11px] font-medium text-slate-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+            >
+              Dismiss merchant
+            </button>
+            <button
+              onClick={() => onDismiss(offer.offerIds)}
+              title="Dismiss this offer from listing"
+              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Offer Title & Description */}
@@ -984,15 +1088,20 @@ function OfferCard({
           </div>
         )}
 
-        {/* Footer Meta: Email ID badge + Expiration */}
+        {/* Footer Meta: Email ID badges + Expiration */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500">
-          <span
-            className="inline-flex items-center gap-1 truncate max-w-[180px]"
-            title={`Received in ${offer.emailAccount.email}`}
-          >
-            <Mail className="h-3 w-3 text-slate-400 shrink-0" />
-            <span className="truncate">{offer.emailAccount.email}</span>
-          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {offer.emailAccounts.map((acc) => (
+              <span
+                key={acc.id}
+                className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 max-w-[175px] truncate"
+                title={`Received in ${acc.email}`}
+              >
+                <Mail className="h-2.5 w-2.5 text-slate-400 shrink-0" />
+                <span className="truncate">{acc.email}</span>
+              </span>
+            ))}
+          </div>
 
           <span
             className={`inline-flex items-center gap-1 font-medium ${
