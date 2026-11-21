@@ -45,10 +45,15 @@ export async function runOfferScan(
 
       let emails: RawEmailMessage[] = [];
 
-      if (account.provider === 'google' && account.accessToken) {
-        const plainAccessToken = decryptToken(account.accessToken);
-        const plainRefreshToken = decryptToken(account.refreshToken);
-        if (plainAccessToken) {
+      try {
+        if (account.provider === 'google' && account.accessToken) {
+          const plainAccessToken = decryptToken(account.accessToken);
+          const plainRefreshToken = decryptToken(account.refreshToken);
+          if (!plainAccessToken) {
+            throw new Error(
+              `Failed to decrypt accessToken for ${account.email}. Check TOKEN_ENCRYPTION_KEY.`
+            );
+          }
           emails = await fetchLast30DaysPromotionalEmails(
             plainAccessToken,
             plainRefreshToken,
@@ -62,9 +67,17 @@ export async function runOfferScan(
               });
             }
           );
+        } else if (account.provider === 'demo') {
+          emails = getDemoInboxEmailsForLast30Days(account.email);
+        } else {
+          throw new Error(`No access token stored for ${account.email}. Try reconnecting the account.`);
         }
-      } else if (account.provider === 'demo') {
-        emails = getDemoInboxEmailsForLast30Days(account.email);
+      } catch (accountErr: any) {
+        await prisma.emailAccount.update({
+          where: { id: account.id },
+          data: { status: 'error' },
+        });
+        throw new Error(`[${account.email}] ${accountErr?.message || accountErr}`);
       }
 
       accountsScanned++;

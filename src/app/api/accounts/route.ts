@@ -36,7 +36,12 @@ export async function GET(req: NextRequest) {
       orderBy: { startedAt: 'desc' },
     });
 
-    return NextResponse.json({ accounts, latestScan });
+    const recentLogs = await prisma.scanLog.findMany({
+      orderBy: { startedAt: 'desc' },
+      take: 10,
+    });
+
+    return NextResponse.json({ accounts, latestScan, recentLogs });
   } catch (error: any) {
     console.error('Error loading accounts:', error);
     return NextResponse.json(

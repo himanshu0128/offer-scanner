@@ -80,6 +80,9 @@ export default function OfferDashboardPage() {
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [latestScan, setLatestScan] = useState<any>(null);
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
+  const [showLogsModal, setShowLogsModal] = useState(false);
+  const [lastErrorBanner, setLastErrorBanner] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -108,7 +111,13 @@ export default function OfferDashboardPage() {
       const res = await fetch('/api/accounts');
       const data = await res.json();
       if (data.accounts) setAccounts(data.accounts);
-      if (data.latestScan) setLatestScan(data.latestScan);
+      if (data.latestScan) {
+        setLatestScan(data.latestScan);
+        if (data.latestScan.status === 'failed' && data.latestScan.errorMessage) {
+          setLastErrorBanner(data.latestScan.errorMessage);
+        }
+      }
+      if (data.recentLogs) setRecentLogs(data.recentLogs);
     } catch (err) {
       console.error('Failed to fetch accounts', err);
     }
@@ -185,6 +194,7 @@ export default function OfferDashboardPage() {
 
   const handleManualRefresh = async () => {
     setScanning(true);
+    setLastErrorBanner(null);
     try {
       const res = await fetch('/api/scan', {
         method: 'POST',
@@ -193,19 +203,29 @@ export default function OfferDashboardPage() {
           accountId: selectedEmailId !== 'all' ? selectedEmailId : undefined,
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const rawText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        data = { error: `HTTP ${res.status}`, details: rawText.slice(0, 300) };
+      }
+
       if (res.ok) {
         showToast(data.message || 'Scan completed!');
         await Promise.all([fetchAccounts(), fetchOffers()]);
       } else {
-        showToast(
-          data.details
-            ? `${data.error}: ${data.details}`
-            : data.error || 'Failed to run scan.'
-        );
+        const errMsg = data.details
+          ? `${data.error}: ${data.details}`
+          : data.error || `HTTP ${res.status} Failed to run scan`;
+        setLastErrorBanner(errMsg);
+        showToast(errMsg);
+        await fetchAccounts();
       }
-    } catch (err) {
-      showToast('Error triggering manual scan.');
+    } catch (err: any) {
+      const errMsg = `Network/Scan Error: ${err?.message || String(err)}`;
+      setLastErrorBanner(errMsg);
+      showToast(errMsg);
     } finally {
       setScanning(false);
     }
@@ -436,6 +456,22 @@ export default function OfferDashboardPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
+        {/* Live Error Banner if a scan fails */}
+        {lastErrorBanner && (
+          <div className="mb-6 flex items-start justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 shadow-sm">
+            <div>
+              <span className="font-bold">Scan Error Diagnostic: </span>
+              <span className="font-mono break-all">{lastErrorBanner}</span>
+            </div>
+            <button
+              onClick={() => setLastErrorBanner(null)}
+              className="rounded-lg p-1 text-rose-500 hover:bg-rose-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {/* Connected Email Accounts Bar */}
         <section className="mb-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -445,12 +481,29 @@ export default function OfferDashboardPage() {
                 Connected Email Accounts ({accounts.length})
               </h2>
             </div>
-            {latestScan && (
-              <span className="text-xs text-slate-500">
-                Last scan ({latestScan.triggerType}):{' '}
-                {new Date(latestScan.startedAt).toLocaleString()}
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {latestScan && (
+                <span className="text-xs text-slate-500">
+                  Last scan ({latestScan.triggerType} •{' '}
+                  <span
+                    className={
+                      latestScan.status === 'failed'
+                        ? 'font-semibold text-rose-600'
+                        : 'font-semibold text-emerald-600'
+                    }
+                  >
+                    {latestScan.status}
+                  </span>
+                  ): {new Date(latestScan.startedAt).toLocaleString()}
+                </span>
+              )}
+              <button
+                onClick={() => setShowLogsModal(true)}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                View Scan Logs ({recentLogs.length})
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
@@ -720,6 +773,69 @@ export default function OfferDashboardPage() {
                 <Mail className="h-4 w-4" />
                 Connect Gmail with Google OAuth
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scan Logs & Diagnostics Modal */}
+      {showLogsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <h3 className="text-base font-bold text-slate-900">
+                Recent Scan Logs & Error Diagnostics
+              </h3>
+              <button
+                onClick={() => setShowLogsModal(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-4 max-h-96 space-y-3 overflow-y-auto">
+              {recentLogs.length === 0 ? (
+                <p className="text-xs text-slate-500">No scan logs recorded yet.</p>
+              ) : (
+                recentLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className={`rounded-xl border p-3.5 text-xs ${
+                      log.status === 'failed'
+                        ? 'border-rose-200 bg-rose-50/70 text-rose-900'
+                        : 'border-slate-200 bg-slate-50 text-slate-800'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 font-semibold">
+                      <span>
+                        {log.triggerType.toUpperCase()} —{' '}
+                        <span
+                          className={
+                            log.status === 'failed'
+                              ? 'text-rose-600'
+                              : 'text-emerald-600'
+                          }
+                        >
+                          {log.status.toUpperCase()}
+                        </span>
+                      </span>
+                      <span className="text-slate-500 font-normal">
+                        {new Date(log.startedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-4 text-[11px] text-slate-600">
+                      <span>Accounts scanned: {log.accountsScanned}</span>
+                      <span>Emails processed: {log.emailsProcessed}</span>
+                      <span>New offers found: {log.offersExtracted}</span>
+                    </div>
+                    {log.errorMessage && (
+                      <pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-rose-100/80 p-2.5 font-mono text-[11px] text-rose-900">
+                        {log.errorMessage}
+                      </pre>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
