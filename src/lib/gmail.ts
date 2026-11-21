@@ -5,17 +5,22 @@ const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
 ];
 
-export function getGoogleOAuthClient() {
+export function getGoogleOAuthClient(originOverride?: string) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-  const redirectUri = `${appUrl}/api/accounts/callback/google`;
+  const appUrl =
+    originOverride ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : 'http://localhost:3000');
+  const redirectUri = `${appUrl.replace(/\/$/, '')}/api/accounts/callback/google`;
 
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-export function getGoogleAuthUrl(state?: string) {
-  const oauth2Client = getGoogleOAuthClient();
+export function getGoogleAuthUrl(state?: string, originOverride?: string) {
+  const oauth2Client = getGoogleOAuthClient(originOverride);
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',

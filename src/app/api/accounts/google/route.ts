@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   // Generate cryptographic CSRF state token and bind it to an HttpOnly cookie
   const state = generateOAuthState();
-  const authUrl = getGoogleAuthUrl(state);
+  const authUrl = getGoogleAuthUrl(state, origin);
 
   const response = NextResponse.redirect(authUrl);
   response.cookies.set('oauth_state', state, {

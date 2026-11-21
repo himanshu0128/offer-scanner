@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const oauth2Client = getGoogleOAuthClient();
+    const oauth2Client = getGoogleOAuthClient(appUrl);
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
