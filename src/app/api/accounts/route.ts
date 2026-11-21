@@ -4,6 +4,8 @@ import { revokeGoogleToken } from '@/lib/gmail';
 import { decryptToken } from '@/lib/crypto';
 import { getSessionFromRequest } from '@/lib/auth';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = getSessionFromRequest(req);

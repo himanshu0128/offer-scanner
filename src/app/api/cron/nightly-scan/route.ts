@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runOfferScan } from '@/lib/scanner';
 import { timingSafeEqualStr } from '@/lib/crypto';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * Automated Nightly Cron Endpoint (runs daily at 2:00 AM via Vercel Cron, GitHub Actions, or node-cron).
  * Scans the last 30 days of emails across all connected email accounts.

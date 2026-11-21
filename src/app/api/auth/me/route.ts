@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest, SESSION_COOKIE_NAME } from '@/lib/auth';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) {
